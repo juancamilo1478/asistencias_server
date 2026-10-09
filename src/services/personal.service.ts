@@ -1,56 +1,77 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { drive_v3, google, sheets_v4 } from 'googleapis';
 import { env } from '../config/env.js';
 import { PersonalDto } from '../dto/personal_dto.js';
+import { GOOGLE_SHEETS, GOOGLE_DRIVE } from '../google/google.providers.js';
+import { Respuesta } from '../common/respuestas.js';
 
 @Injectable()
 export class PersonalService {
-    private readonly sheets: sheets_v4.Sheets;
-    private readonly drive: drive_v3.Drive;
-    constructor() {
-        const auth = new google.auth.GoogleAuth({
-            keyFile:
-                process.env.GOOGLE_APPLICATION_CREDENTIALS ??
-                'src/llaves/google.json',
-            scopes: [
-                'https://www.googleapis.com/auth/spreadsheets.readonly',
-                'https://www.googleapis.com/auth/drive.readonly',
-            ],
-        });
+ 
+    constructor(
+        @Inject(GOOGLE_SHEETS)
+        private readonly sheets: sheets_v4.Sheets,
 
-        this.sheets = google.sheets({ version: 'v4', auth });
-        this.drive = google.drive({ version: 'v3', auth });
+        @Inject(GOOGLE_DRIVE)
+        private readonly drive: drive_v3.Drive,
+    ) {
+
     }
 
-    async obtenerDatos(rango = 'A:Z'): Promise<PersonalDto[]> {
+
+    /**
+     * @worksheet Personal
+     */
+    async obtenerDatos(rango = 'A:Z'): Promise<Respuesta<PersonalDto[]>> {
         try {
             const spreadsheetId = env.GOOGLE_SHEET_ID;
-            const worksheet = env.WORKSHEET;
-            if (!spreadsheetId) {
-                throw new Error('La variable de entorno GOOGLE_SHEET_ID no está configurada.');
-            }
-
+            const worksheet ='Personal';
             const response = await this.sheets.spreadsheets.values.get({
                 spreadsheetId,
                 range: `${worksheet}!${rango}`,
             });
             // Convertir los datos obtenidos a PersonalDto[][]
             const datos = response.data.values?.slice(1) ?? [];
-            return await this.convertirADto(datos);
+            return {
+                success: true,
+                data: await this.convertirADto(datos),
+                message: 'Datos obtenidos correctamente',
+            };
         }
         catch (error) {
             console.error('Error al obtener los datos:', error);
-            throw error;
+            return {
+                success: false,
+                message: 'Error al obtener los datos',
+            };
         }
     }
 
     async convertirADto(filas: unknown[][]): Promise<PersonalDto[]> {
-        return Promise.all(filas.map(async (fila) => ({
-            id: Number(fila[0]),
-            cedula: String(fila[1]),
-            nombre: String(fila[2]),
-            foto: await this.convertirFoto(String(fila[3])),
-        })));
+        return Promise.all(
+            filas
+                .filter(fila =>
+                    fila.some(valor =>
+                        valor !== null &&
+                        valor !== undefined &&
+                        valor !== ""
+                    )
+                )
+                .map(async (fila) => ({
+
+                    id: String(fila[1] ?? ""),
+                    cedula: String(fila[2] ?? ""),
+                    nombre: String(fila[3] ?? ""),
+                    telefono: String(fila[4] ?? ""),
+                    direccion: String(fila[5] ?? ""),
+                    foto: await this.convertirFoto(String(fila[6] ?? "")),
+                    obra: String(fila[7] ?? ""),
+                    contratista: String(fila[8] ?? ""),
+                    idObra: String(fila[9] ?? ""),
+                    idContratista: String(fila[10] ?? ""),
+                    cargo:String(fila[11] ?? "")
+                }))
+        );
     }
     /**
      * @requerimiento se necesita chekear si la foto esta en lh3 si lo esta dejar normal 
@@ -77,7 +98,7 @@ export class PersonalService {
 
         // Limpiamos posibles espacios en blanco accidentales en el nombre
         const nombreLimpio = nombre.trim();
-        console.log('Buscando archivo en Drive:', nombreLimpio);
+     
 
         const folderId = env.FOLDER_DRIVE_FOTOS;
 
@@ -109,7 +130,7 @@ export class PersonalService {
                 return foto;
             }
 
-            console.log(`¡Archivo encontrado! ID: ${archivo.id} (${archivo.name})`);
+            
             return `https://lh3.googleusercontent.com/d/${archivo.id}`;
 
         } catch (error) {
